@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arşiv — Video Kütüphanesi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- 🔥 FIREBASE: Bu proje Firebase Realtime Database'i düz REST API (fetch) ile kullanıyor.
+     Firebase SDK kullanılmıyor çünkü SDK'nın gerçek zamanlı senkron özelliği bazı antivirüs/reklam
+     engelleyiciler tarafından engellenen "channel" istekleri kullanıyor. Bu yüzden düz HTTPS GET/PUT/POST/
+     PATCH/DELETE istekleri (Realtime Database REST API) ile birkaç saniyede bir otomatik yenileme yapılıyor. -->
+<script>
+  const RTDB_BASE = "https://videoarsiv-36228-default-rtdb.europe-west1.firebasedatabase.app";
+</script>
+<style>
+  :root{
+    --bg: #121110;
+    --bg-raised: #1c1a17;
+    --bg-card: #201d19;
+    --hairline: #35312b;
+    --text: #ece6da;
+    --text-dim: #9d968a;
+    --accent: #e8a33d;
+    --accent-dim: #7a5b28;
+    --teal: #3d6e64;
+    --danger: #c1523f;
+    --radius: 3px;
+  }
+  *{ box-sizing: border-box; }
+  body{ margin:0; }
+  html, body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Manrope', sans-serif;
+    min-height: 100vh;
+  }
+  .display{ font-family:'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+
+  /* film perforation motif */
+  .sprocket-row{
+    display:flex; gap:8px; padding: 6px 0;
+    overflow:hidden;
+  }
+  .sprocket-row span{
+    width:10px; height:10px; flex-shrink:0;
+    background: var(--hairline);
+    border-radius:2px;
+  }
+
+  header{
+    border-bottom: 1px solid var(--hairline);
+    background: linear-gradient(180deg, var(--bg-raised), var(--bg));
+    position: sticky; top:0; z-index: 20;
+  }
+  .header-inner{
+    max-width: 1280px; margin:0 auto; padding: 18px 28px 0 28px;
+  }
+  .brand-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand h1{ font-size: 34px; margin:0; color: var(--accent); font-weight:400; }
+  .brand small{ color: var(--text-dim); font-size:12px; text-transform:uppercase; letter-spacing:.14em; }
+
+  .toolbar{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    padding: 14px 0 14px 0;
+  }
+  input[type=text], input[type=url], textarea, select{
+    background: var(--bg-card);
+    border: 1px solid var(--hairline);
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+  }
+  input[type=text]:focus, input[type=url]:focus, textarea:focus, select:focus{
+    outline: none; border-color: var(--accent);
+  }
+  #searchInput{ min-width: 240px; flex: 1; }
+
+  button{
+    font-family: inherit; cursor:pointer; border:none; border-radius: var(--radius);
+    padding: 9px 16px; font-size: 14px; font-weight:600;
+  }
+  .btn-accent{ background: var(--accent); color:#1b1408; }
+  .btn-accent:hover{ background:#f5b355; }
+  .btn-ghost{ background: transparent; color: var(--text); border:1px solid var(--hairline); }
+  .btn-ghost:hover{ border-color: var(--accent); color: var(--accent); }
+  .btn-danger{ background: transparent; color: var(--danger); border:1px solid var(--danger); }
+  .btn-danger:hover{ background: var(--danger); color:#1b1408; }
+  .icon-btn{
+    background: transparent; border:1px solid var(--hairline); color: var(--text-dim);
+    padding: 6px 9px; font-size:12px;
+  }
+  .icon-btn:hover{ color: var(--text); border-color: var(--text-dim); }
+
+  .layout{
+    max-width: 1280px; margin: 0 auto; display:flex; gap: 28px;
+    padding: 24px 28px 60px 28px;
+  }
+  .sidebar{
+    width: 210px; flex-shrink:0;
+  }
+  .sidebar h4{
+    font-size:11px; text-transform:uppercase; letter-spacing:.14em; color: var(--text-dim);
+    margin: 0 0 10px 2px;
+  }
+  .cat-list{ list-style:none; margin:0 0 22px 0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .cat-list button{
+    width:100%; text-align:left; background:transparent; border:none; color: var(--text-dim);
+    padding: 8px 10px; border-radius: var(--radius); font-weight:500; font-size:14px;
+    display:flex; justify-content:space-between;
+  }
+  .cat-list button:hover{ background: var(--bg-card); color: var(--text); }
+  .cat-list button.active{ background: var(--bg-card); color: var(--accent); border-left: 2px solid var(--accent); }
+  .cat-list .count{ color: var(--text-dim); font-size:12px; }
+
+  .main{ flex:1; min-width:0; }
+  .grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px;
+  }
+  .card{
+    background: var(--bg-card); border:1px solid var(--hairline); border-radius: var(--radius);
+    overflow:hidden; display:flex; flex-direction:column; transition: border-color .15s, transform .15s;
+  }
+  .card:hover{ border-color: var(--accent-dim); transform: translateY(-2px); }
+  .thumb{
+    position:relative; aspect-ratio: 16/9; background:#0c0b0a; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; overflow:hidden;
+  }
+  .thumb video{ width:100%; height:100%; object-fit:cover; pointer-events:none; }
+  .thumb .play-glyph{
+    position:absolute; width:46px; height:46px; border-radius:50%;
+    background: rgba(18,17,16,0.55); border:1px solid var(--accent);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .thumb .play-glyph::after{
+    content:''; border-style:solid; border-width:8px 0 8px 13px;
+    border-color: transparent transparent transparent var(--accent);
+    margin-left:3px;
+  }
+  .card-body{ padding: 12px 14px 14px 14px; display:flex; flex-direction:column; gap:6px; flex:1; }
+  .card-cat{
+    font-size:10px; text-transform:uppercase; letter-spacing:.1em; color: var(--teal);
+    background: rgba(61,110,100,0.18); align-self:flex-start; padding:2px 7px; border-radius: 2px;
+  }
+  .card-title{ font-size:15.5px; font-weight:700; margin:0; line-height:1.3; }
+  .card-desc{ font-size:12.5px; color: var(--text-dim); line-height:1.45; flex:1;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin:0; }
+  .card-actions{ display:flex; gap:6px; margin-top:6px; }
+
+  .empty-state{
+    border:1px dashed var(--hairline); border-radius: var(--radius); padding: 60px 20px; text-align:center; color: var(--text-dim);
+  }
+  .empty-state .display{ font-size:26px; color: var(--text); display:block; margin-bottom:6px; }
+
+  /* Modal */
+  .overlay{
+    position:fixed; inset:0; background: rgba(8,7,6,0.78); display:none;
+    align-items:center; justify-content:center; z-index:100; padding:20px;
+  }
+  .overlay.open{ display:flex; }
+  .modal{
+    background: var(--bg-raised); border:1px solid var(--hairline); border-radius: var(--radius);
+    width:100%; max-width: 520px; max-height:90vh; overflow-y:auto;
+  }
+  .modal.wide{ max-width: 900px; }
+  .modal-head{
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 16px 20px; border-bottom:1px solid var(--hairline);
+  }
+  .modal-head h3{ margin:0; font-size:20px; font-weight:400; }
+  .modal-close{ background:transparent; border:none; color: var(--text-dim); font-size:20px; padding:2px 8px; }
+  .modal-close:hover{ color: var(--text); }
+  .modal-body{ padding: 20px; }
+  .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .field label{ font-size:12px; text-transform:uppercase; letter-spacing:.08em; color: var(--text-dim); }
+  .field textarea{ resize:vertical; min-height:70px; }
+  .cat-add-row{ display:flex; gap:8px; }
+  .cat-add-row select{ flex:1; }
+  .modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding: 4px 20px 20px 20px; }
+
+  .player-wrap{ padding:0; }
+  .player-media{ width:100%; aspect-ratio:16/9; background:#000; }
+  .player-media video, .player-media iframe{ width:100%; height:100%; display:block; border:none; }
+  .player-info{ padding: 18px 20px; }
+  .player-info h3{ margin:0 0 4px 0; font-weight:700; font-size:19px; }
+  .player-info .card-cat{ margin-bottom:10px; }
+  .player-info p{ margin:0; color: var(--text-dim); font-size:14px; line-height:1.6; }
+
+  .sync-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--teal); margin-right:6px; vertical-align:middle; }
+  .sync-dot.err{ background: var(--danger); }
+  #syncStatus{ font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
+
+  ::-webkit-scrollbar{ width:10px; }
+  ::-webkit-scrollbar-track{ background: var(--bg); }
+  ::-webkit-scrollbar-thumb{ background: var(--hairline); border-radius:5px; }
+
+  @media (max-width: 720px){
+    .layout{ flex-direction:column; }
+    .sidebar{ width:100%; }
+    .cat-list{ flex-direction:row; flex-wrap:wrap; }
+    .cat-list button{ width:auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="brand-row">
+      <div class="brand">
+        <h1 class="display">ARŞİV</h1>
+        <small>video kütüphanem</small>
+      </div>
+      <button class="btn-accent" id="openAddBtn">+ Video Ekle</button>
+    </div>
+    <div class="sprocket-row" id="sprocketRow"></div>
+    <div class="toolbar">
+      <input type="text" id="searchInput" placeholder="Başlık veya açıklamada ara...">
+      <span id="syncStatus"><span class="sync-dot" id="syncDot"></span>Senkronize ediliyor...</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h4>Kategoriler</h4>
+    <ul class="cat-list" id="catList"></ul>
+    <button class="btn-ghost" id="manageCatBtn" style="width:100%;">Kategorileri Yönet</button>
+  </aside>
+
+  <main class="main">
+    <div class="grid" id="videoGrid"></div>
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <span class="display">Kayıt yok</span>
+      Henüz video eklenmedi. Sağ üstteki <strong>+ Video Ekle</strong> butonuyla ilk kaydını oluştur.
+    </div>
+  </main>
+</div>
+
+<!-- Add/Edit Video Modal -->
+<div class="overlay" id="formOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="formTitle" class="display">Video Ekle</h3>
+      <button class="modal-close" data-close="formOverlay">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="videoId">
+      <div class="field">
+        <label>Video Bağlantısı (mp4, webm, YouTube vb.)</label>
+        <input type="url" id="videoUrl" placeholder="https://... veya cdn linki" required>
+      </div>
+      <div class="field">
+        <label>Başlık</label>
+        <input type="text" id="videoTitle" placeholder="Video başlığı" required>
+      </div>
+      <div class="field">
+        <label>Açıklama</label>
+        <textarea id="videoDesc" placeholder="Kısa açıklama (opsiyonel)"></textarea>
+      </div>
+      <div class="field">
+        <label>Kategori</label>
+        <div class="cat-add-row">
+          <select id="videoCatSelect"></select>
+          <button type="button" class="btn-ghost" id="newCatInline">+ Yeni</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="formOverlay">Vazgeç</button>
+      <button class="btn-accent" id="saveVideoBtn">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Player Modal -->
+<div class="overlay" id="playerOverlay">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h3 class="display">Oynatılıyor</h3>
+      <button class="modal-close" data-close="playerOverlay">×</button>
+    </div>
+    <div class="player-wrap">
+      <div class="player-media" id="playerMedia"></div>
+      <div class="player-info">
+        <span class="card-cat" id="playerCat"></span>
+        <h3 id="playerTitle"></h3>
+        <p id="playerDesc"></p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="playerEditBtn">Düzenle</button>
+      <button class="btn-danger" id="playerDeleteBtn">Sil</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manage Categories Modal -->
+<div class="overlay" id="catOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 class="display">Kategorileri Yönet</h3>
+      <button class="modal-close" data-close="catOverlay">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Yeni Kategori</label>
+        <div class="cat-add-row">
+          <input type="text" id="newCatName" placeholder="Kategori adı">
+          <button class="btn-accent" id="addCatBtn">Ekle</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Mevcut Kategoriler</label>
+        <div id="catManageList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const DEFAULT_CATS = ['Genel'];
+  const BASE = RTDB_BASE;
+  const POLL_MS = 4000;
+
+  let state = { videos: [], categories: DEFAULT_CATS.slice() };
+  let activeCategory = 'Tümü';
+  let searchTerm = '';
+  let editingId = null;
+  let pollTimer = null;
+
+  const $ = (id) => document.getElementById(id);
+  const grid = $('videoGrid');
+  const emptyState = $('emptyState');
+  const catList = $('catList');
+  const searchInput = $('searchInput');
+  const syncDot = $('syncDot');
+  const syncStatus = $('syncStatus');
+
+  // sprocket decoration
+  (function buildSprockets(){
+    const row = $('sprocketRow');
+    let html = '';
+    for(let i=0;i<60;i++) html += '<span></span>';
+    row.innerHTML = html;
+  })();
+
+  function isYouTube(url){ return /youtube\.com|youtu\.be/i.test(url); }
+  function youTubeEmbed(url){
+    let id = '';
+    const m1 = url.match(/[?&]v=([^&]+)/);
+    const m2 = url.match(/youtu\.be\/([^?&]+)/);
+    if(m1) id = m1[1]; else if(m2) id = m2[1];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+  }
+
+  // ---- Realtime Database REST helpers (no SDK, no "channel" long-polling endpoints) ----
+  async function apiListVideos(){
+    const res = await fetch(`${BASE}/videos.json`);
+    if(!res.ok) throw new Error('Videolar alınamadı (HTTP ' + res.status + ')');
+    const data = await res.json();
+    const list = data ? Object.keys(data).map(id => ({ id, ...data[id] })) : [];
+    list.sort((a,b) => (b.addedAt||0) - (a.addedAt||0));
+    return list;
+  }
+
+  async function apiAddVideo(v){
+    const res = await fetch(`${BASE}/videos.json`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(v)
+    });
+    if(!res.ok) throw new Error('Kaydedilemedi (HTTP ' + res.status + ')');
+    return res.json();
+  }
+
+  async function apiUpdateVideo(id, v){
+    const res = await fetch(`${BASE}/videos/${id}.json`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(v)
+    });
+    if(!res.ok) throw new Error('Güncellenemedi (HTTP ' + res.status + ')');
+    return res.json();
+  }
+
+  async function apiDeleteVideo(id){
+    const res = await fetch(`${BASE}/videos/${id}.json`, { method: 'DELETE' });
+    if(!res.ok) throw new Error('Silinemedi (HTTP ' + res.status + ')');
+  }
+
+  async function apiGetCategories(){
+    const res = await fetch(`${BASE}/categories.json`);
+    if(!res.ok) throw new Error('Kategoriler alınamadı (HTTP ' + res.status + ')');
+    const data = await res.json();
+    return data && data.length ? { list: data } : null;
+  }
+
+  async function apiSetCategories(list){
+    const res = await fetch(`${BASE}/categories.json`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(list)
+    });
+    if(!res.ok) throw new Error('Kategori kaydedilemedi (HTTP ' + res.status + ')');
+  }
+
+  // ---- Rendering (same as before) ----
+  function renderCategories(){
+    const counts = {};
+    state.videos.forEach(v => counts[v.category] = (counts[v.category]||0) + 1);
+    const total = state.videos.length;
+
+    let html = `<li><button class="${activeCategory==='Tümü'?'active':''}" data-cat="Tümü">Tümü <span class="count">${total}</span></button></li>`;
+    state.categories.forEach(c => {
+      html += `<li><button class="${activeCategory===c?'active':''}" data-cat="${escapeHtml(c)}">${escapeHtml(c)} <span class="count">${counts[c]||0}</span></button></li>`;
+    });
+    catList.innerHTML = html;
+    catList.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => { activeCategory = b.dataset.cat; renderCategories(); renderGrid(); });
+    });
+  }
+
+  function renderCatSelect(selectEl, selected){
+    selectEl.innerHTML = state.categories.map(c => `<option value="${escapeHtml(c)}" ${c===selected?'selected':''}>${escapeHtml(c)}</option>`).join('');
+  }
+
+  function renderGrid(){
+    let list = state.videos.slice();
+    if(activeCategory !== 'Tümü') list = list.filter(v => v.category === activeCategory);
+    if(searchTerm){
+      const t = searchTerm.toLowerCase();
+      list = list.filter(v => (v.title||'').toLowerCase().includes(t) || (v.description||'').toLowerCase().includes(t));
+    }
+
+    if(list.length === 0){
+      grid.innerHTML = '';
+      emptyState.style.display = 'block';
+      return;
+    }
+    emptyState.style.display = 'none';
+
+    grid.innerHTML = list.map(v => {
+      const thumbInner = isYouTube(v.url)
+        ? `<div class="play-glyph"></div>`
+        : `<video src="${escapeHtml(v.url)}" preload="metadata" muted></video><div class="play-glyph"></div>`;
+      return `
+      <div class="card" data-id="${v.id}">
+        <div class="thumb" data-play="${v.id}">${thumbInner}</div>
+        <div class="card-body">
+          <span class="card-cat">${escapeHtml(v.category)}</span>
+          <p class="card-title">${escapeHtml(v.title)}</p>
+          <p class="card-desc">${escapeHtml(v.description)}</p>
+          <div class="card-actions">
+            <button class="icon-btn" data-edit="${v.id}">Düzenle</button>
+            <button class="icon-btn" data-del="${v.id}">Sil</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    grid.querySelectorAll('[data-play]').forEach(el => {
+      el.addEventListener('click', () => openPlayer(el.dataset.play));
+    });
+    grid.querySelectorAll('[data-edit]').forEach(el => {
+      el.addEventListener('click', (e) => { e.stopPropagation(); openEdit(el.dataset.edit); });
+    });
+    grid.querySelectorAll('[data-del]').forEach(el => {
+      el.addEventListener('click', (e) => { e.stopPropagation(); deleteVideo(el.dataset.del); });
+    });
+  }
+
+  function openOverlay(id){ $(id).classList.add('open'); }
+  function closeOverlay(id){ $(id).classList.remove('open'); }
+
+  document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      closeOverlay(btn.dataset.close);
+      if(btn.dataset.close === 'playerOverlay') $('playerMedia').innerHTML = '';
+    });
+  });
+  document.querySelectorAll('.overlay').forEach(ov => {
+    ov.addEventListener('click', (e) => {
+      if(e.target === ov){
+        ov.classList.remove('open');
+        if(ov.id === 'playerOverlay') $('playerMedia').innerHTML = '';
+      }
+    });
+  });
+
+  // Add / Edit form
+  $('openAddBtn').addEventListener('click', () => {
+    editingId = null;
+    $('formTitle').textContent = 'Video Ekle';
+    $('videoId').value = '';
+    $('videoUrl').value = '';
+    $('videoTitle').value = '';
+    $('videoDesc').value = '';
+    renderCatSelect($('videoCatSelect'), state.categories[0]);
+    openOverlay('formOverlay');
+  });
+
+  function openEdit(id){
+    const v = state.videos.find(x => x.id === id);
+    if(!v) return;
+    editingId = id;
+    $('formTitle').textContent = 'Videoyu Düzenle';
+    $('videoId').value = v.id;
+    $('videoUrl').value = v.url;
+    $('videoTitle').value = v.title;
+    $('videoDesc').value = v.description;
+    renderCatSelect($('videoCatSelect'), v.category);
+    closeOverlay('playerOverlay');
+    $('playerMedia').innerHTML = '';
+    openOverlay('formOverlay');
+  }
+
+  $('newCatInline').addEventListener('click', async () => {
+    const name = prompt('Yeni kategori adı:');
+    if(name && name.trim()){
+      const clean = name.trim();
+      if(!state.categories.includes(clean)){
+        try{
+          const newList = state.categories.concat([clean]);
+          await apiSetCategories(newList);
+          state.categories = newList;
+        }catch(e){ alert('Kategori eklenemedi: ' + e.message); console.error(e); return; }
+      }
+      renderCatSelect($('videoCatSelect'), clean);
+    }
+  });
+
+  $('saveVideoBtn').addEventListener('click', async () => {
+    const url = $('videoUrl').value.trim();
+    const title = $('videoTitle').value.trim();
+    const description = $('videoDesc').value.trim();
+    const category = $('videoCatSelect').value || state.categories[0];
+
+    if(!url || !title){
+      alert('Lütfen video bağlantısı ve başlık girin.');
+      return;
+    }
+
+    const btn = $('saveVideoBtn');
+    btn.disabled = true; btn.textContent = 'Kaydediliyor...';
+    try{
+      if(editingId){
+        await apiUpdateVideo(editingId, { url, title, description, category });
+      } else {
+        await apiAddVideo({ url, title, description, category, addedAt: Date.now() });
+      }
+      closeOverlay('formOverlay');
+      await refreshAll();
+    }catch(e){
+      alert('Kaydedilemedi: ' + e.message);
+      console.error(e);
+    }finally{
+      btn.disabled = false; btn.textContent = 'Kaydet';
+    }
+  });
+
+  async function deleteVideo(id){
+    if(!confirm('Bu videoyu silmek istediğine emin misin?')) return;
+    try{
+      await apiDeleteVideo(id);
+    }catch(e){
+      alert('Silinemedi: ' + e.message);
+      console.error(e);
+      return;
+    }
+    closeOverlay('playerOverlay');
+    $('playerMedia').innerHTML = '';
+    await refreshAll();
+  }
+
+  function openPlayer(id){
+    const v = state.videos.find(x => x.id === id);
+    if(!v) return;
+    const media = $('playerMedia');
+    if(isYouTube(v.url)){
+      media.innerHTML = `<iframe src="${youTubeEmbed(v.url)}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+    } else {
+      media.innerHTML = `<video src="${escapeHtml(v.url)}" controls autoplay></video>`;
+    }
+    $('playerCat').textContent = v.category;
+    $('playerTitle').textContent = v.title;
+    $('playerDesc').textContent = v.description || '';
+    $('playerEditBtn').onclick = () => openEdit(v.id);
+    $('playerDeleteBtn').onclick = () => deleteVideo(v.id);
+    openOverlay('playerOverlay');
+  }
+
+  // Manage categories modal
+  $('manageCatBtn').addEventListener('click', () => {
+    renderCatManageList();
+    openOverlay('catOverlay');
+  });
+  $('addCatBtn').addEventListener('click', async () => {
+    const input = $('newCatName');
+    const name = input.value.trim();
+    if(!name) return;
+    if(state.categories.includes(name)){ alert('Bu kategori zaten var.'); return; }
+    try{
+      const newList = state.categories.concat([name]);
+      await apiSetCategories(newList);
+      state.categories = newList;
+      input.value = '';
+      renderCategories();
+      renderCatManageList();
+    }catch(e){ alert('Eklenemedi: ' + e.message); console.error(e); }
+  });
+  function renderCatManageList(){
+    const wrap = $('catManageList');
+    wrap.innerHTML = state.categories.map(c => {
+      const count = state.videos.filter(v => v.category === c).length;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--hairline);">
+        <span>${escapeHtml(c)} <span style="color:var(--text-dim);font-size:12px;">(${count} video)</span></span>
+        <button class="icon-btn" data-remove-cat="${escapeHtml(c)}">Sil</button>
+      </div>`;
+    }).join('');
+    wrap.querySelectorAll('[data-remove-cat]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const c = btn.dataset.removeCat;
+        if(state.categories.length <= 1){ alert('En az bir kategori kalmalı.'); return; }
+        const affected = state.videos.filter(v => v.category === c);
+        const fallback = state.categories.find(x => x !== c);
+        if(affected.length && !confirm(`"${c}" kategorisindeki ${affected.length} video "${fallback}" kategorisine taşınacak. Devam edilsin mi?`)) return;
+
+        try{
+          for(const v of affected){
+            await apiUpdateVideo(v.id, { category: fallback });
+          }
+          const newList = state.categories.filter(x => x !== c);
+          await apiSetCategories(newList);
+          if(activeCategory === c) activeCategory = 'Tümü';
+          await refreshAll();
+          renderCatManageList();
+        }catch(e){
+          alert('Silinemedi: ' + e.message);
+          console.error(e);
+        }
+      });
+    });
+  }
+
+  searchInput.addEventListener('input', (e) => {
+    searchTerm = e.target.value;
+    renderGrid();
+  });
+
+  // ---- Polling loop (Firestore SDK'nın yerine ge\u00e7en, "channel" iste\u011fi olmayan senkron y\u00f6ntemi) ----
+  async function refreshAll(){
+    try{
+      const [videos, catsDoc] = await Promise.all([apiListVideos(), apiGetCategories()]);
+      state.videos = videos;
+      if(catsDoc && catsDoc.list && catsDoc.list.length){
+        state.categories = catsDoc.list;
+      } else if(!catsDoc){
+        state.categories = DEFAULT_CATS.slice();
+        await apiSetCategories(state.categories).catch(()=>{});
+      }
+      renderCategories();
+      renderGrid();
+      renderCatSelect($('videoCatSelect'), $('videoCatSelect').value);
+      if($('catOverlay').classList.contains('open')) renderCatManageList();
+      syncDot.classList.remove('err');
+      syncStatus.lastChild.textContent = ' Senkronize';
+    }catch(e){
+      console.error(e);
+      syncDot.classList.add('err');
+      syncStatus.lastChild.textContent = ' Bağlanamadı';
+    }
+  }
+
+  function startPolling(){
+    refreshAll();
+    pollTimer = setInterval(refreshAll, POLL_MS);
+  }
+
+  startPolling();
+})();
+</script>
+</body>
+</html>
